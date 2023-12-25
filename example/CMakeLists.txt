@@ -6,12 +6,15 @@ function(buildExample EXAMPLE_NAME)
 	# Main
 	SET(MAIN_CPP ${EXAMPLE_FOLDER}/${EXAMPLE_NAME}.cpp)
 	
-	# build 시 포함되어야하는 base폴더 파일
+	# build 시 추가로 포함시킬 파일들
 	file(GLOB BASE_SRC "${BASE_DIR}/*.cpp" "${BASE_DIR}/*.h")
+	set(SHADER_DIR "../shaders/${EXAMPLE_NAME}")
+	file(GLOB SHADER_SRC "${SHADER_DIR}/*.frag" "${SHADER_DIR}/*.vert")
 
 	add_executable(${EXAMPLE_NAME}
 		${MAIN_CPP}
 		${BASE_SRC}
+		${SHADER_SRC}
 	)
 
 	target_link_libraries(${EXAMPLE_NAME} ${Vulkan_LIBRARY} ${glfw_LIBRARY})

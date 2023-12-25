@@ -9,7 +9,7 @@ public:
 	void run() {
 		init();
 		mainLoop();
-		cleanUp();
+		cleanUpBase();
 	}
 };
 
