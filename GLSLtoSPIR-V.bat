@@ -15,14 +15,14 @@ for /d %%i in (%root%\*) do (
     
     :: Compile .vert files
     for %%j in (!subdir!\*.vert) do (
-        glslc.exe %%j -o !subdir!\%%~nj_vert.spv
+        glslc.exe %%j -o !subdir!\%%~nj.vert.spv
     )
 
     :: Compile .frag files
     for %%j in (!subdir!\*.frag) do (
-        glslc.exe %%j -o !subdir!\%%~nj_frag.spv
+        glslc.exe %%j -o !subdir!\%%~nj.frag.spv
     )
 )
 
-echo Compilation completed successfully.
+::echo Compilation completed successfully.
 exit /b 0

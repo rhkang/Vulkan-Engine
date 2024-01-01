@@ -37,7 +37,7 @@ public:
 
 	void setWindowTitle(std::string);
 
-	void keyHandle();
+	virtual void keyHandle();
 	static void keyProcess(GLFWwindow*, int, int, int, int);
 };
 
@@ -60,6 +60,8 @@ const bool enableValidationLayers = true;
 		assert(res == VK_SUCCESS);																					\
 	}																												\
 }
+
+const int MAX_FRAMES_IN_FLIGHT = 2;
 
 struct QueueFamilyIndices {
 	std::optional<uint32_t> graphicsFamily;
@@ -101,6 +103,8 @@ public:
 		this->title = title;
 	}
 
+	bool framebufferResized = false;
+
 	void init();
 	void mainLoop();
 	void cleanUpBase();
@@ -112,12 +116,17 @@ public:
 	void createSurface();
 	void createSwapChain();
 	void createSwapChainImageViews();
+	void recreateSwapChain();
 
 	vk::SurfaceFormatKHR chooseSwapChainSurfaceFormat(std::vector<vk::SurfaceFormatKHR>);
 	vk::PresentModeKHR chooseSwapChainPresentMode(std::vector<vk::PresentModeKHR>);
 	vk::Extent2D chooseSwapChainExtent(const vk::SurfaceCapabilitiesKHR&);
 	
 	vk::ShaderModule createShaderModule(std::vector<char>&);
+
+	virtual void drawFrame() = 0;
+	virtual void createFrameBuffers() = 0;
+	virtual void destroyFrameBuffers() = 0;
 };
 
 const std::string getShadersPath();

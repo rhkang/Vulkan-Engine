@@ -6,63 +6,73 @@ public:
 
 	}
 
+	~Triangle() {
+		for (auto i = 0;i < MAX_FRAMES_IN_FLIGHT; i++) {
+			device.destroySemaphore(imageAvailableSemaphores[i]);
+			device.destroySemaphore(renderFinishedSemaphores[i]);
+			device.destroyFence(inflightFences[i]);
+		}
+
+		device.destroyCommandPool(commandPool);
+
+		destroyFrameBuffers();
+
+		device.destroyPipeline(graphicsPipeline);
+		device.destroyRenderPass(renderPass);
+		device.destroyPipelineLayout(pipelineLayout);
+
+		cleanUpBase();
+	}
+
 	void run() {
 		init();
 		prepare();
 		mainLoop();
-		cleanUp();
-		cleanUpBase();
 	}
 
 private:
+	// Renderpass : 렌더링 구조를 명시한다고 보면 된다
 	vk::RenderPass renderPass;
+
+	// Pipeline이 Descriptor Sets에 접근하기 위해 필요하다
 	vk::PipelineLayout pipelineLayout;
+
+	// Pipeline (pipeline state object) - 파이프라인 단계마다 렌더링 동작을 명시한다
 	vk::Pipeline graphicsPipeline;
+
+	// Framebuffer는 Renderpass에서 다루는 attachment의 메모리 저장 정보를 들고있다
 	std::vector<vk::Framebuffer> swapChainFrameBuffers;
 
 	vk::CommandPool commandPool;
-	vk::CommandBuffer commandBuffer;
+	std::vector<vk::CommandBuffer> commandBuffers;
+	// CPU (user app.) 단에서의 synchronization에 사용한다
+	std::vector<vk::Fence> inflightFences;
 
-	vk::Semaphore imageAvailableSemaphore;
-	vk::Semaphore renderFinishedSemaphore;
-	vk::Fence inflightFence;
+	// Queue 내의 synchronization에 사용한다
+	std::vector<vk::Semaphore> imageAvailableSemaphores;
+	std::vector<vk::Semaphore> renderFinishedSemaphores;
+
+	uint32_t currentFrame{ 0 };
 
 	void prepare() {
 		createRenderPass();
 		createGraphicsPipeLine();
 		createFrameBuffers();
 		createCommandPool();
-		createCommandBuffer();
+		createCommandBuffers();
 		createSyncObjects();
 	}
 
-	void mainLoop() {
-		while (!glfwWindowShouldClose(window)) {
-			glfwPollEvents();
-			keyHandle();
-
-			drawFrame();
-		}
-
-		device.waitIdle();
-	}
-
-	void cleanUp() {
-		device.destroySemaphore(imageAvailableSemaphore);
-		device.destroySemaphore(renderFinishedSemaphore);
-		device.destroyFence(inflightFence);
-
-		device.destroyCommandPool(commandPool);
-
-		for (auto i = 0; i < swapChainFrameBuffers.size(); i++) {
-			device.destroyFramebuffer(swapChainFrameBuffers[i]);
-		}
-
-		device.destroyPipeline(graphicsPipeline);
-		device.destroyRenderPass(renderPass);
-		device.destroyPipelineLayout(pipelineLayout);
-	}
-
+	// - Attachment
+	//		렌더링 과정에서 사용하는 이미지
+	// - Subpass
+	//		1개 이상의 subpass를 가진다
+	// - Subpass Dependency
+	//		srcSubpass - 의존 관계에 있는 subpass / dstSubpass - 현재 subpass
+	//		StageMask <- Pipeline Stage 명시
+	//			src - ensures logically earlier stages to be executed
+	//			dst - ensures logically later stages not to be executed
+	//		AccessMask <- Memory access
 	void createRenderPass() {
 		vk::AttachmentDescription colorAttachment{
 			.format = swapChainFormat,
@@ -108,8 +118,8 @@ private:
 	}
 
 	void createGraphicsPipeLine() {
-		auto vert = readFileAsBinary(getShadersPath() + "triangle/triangle_vert.spv");
-		auto frag = readFileAsBinary(getShadersPath() + "triangle/triangle_frag.spv");
+		auto vert = readFileAsBinary(getShadersPath() + "triangle/triangle.vert.spv");
+		auto frag = readFileAsBinary(getShadersPath() + "triangle/triangle.frag.spv");
 
 		auto vertModule = createShaderModule(vert);
 		auto fragModule = createShaderModule(frag);
@@ -135,11 +145,6 @@ private:
 		vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
 			.topology = vk::PrimitiveTopology::eTriangleList,
 			.primitiveRestartEnable = vk::False,
-		};
-
-		std::vector<vk::DynamicState> dynamicStates{
-			vk::DynamicState::eViewport,
-			vk::DynamicState::eScissor,
 		};
 
 		vk::PipelineViewportStateCreateInfo viewportState{
@@ -176,13 +181,16 @@ private:
 			.pAttachments = &colorBlendAttachment,
 		};
 
+		std::vector<vk::DynamicState> dynamicStates{
+			vk::DynamicState::eViewport,
+			vk::DynamicState::eScissor,
+		};
 		vk::PipelineDynamicStateCreateInfo dynamicState{
 			.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
 			.pDynamicStates = dynamicStates.data(),
 		};
 
 		vk::PipelineLayoutCreateInfo pipelineLayoutInfo{};
-
 		pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
 
 		vk::GraphicsPipelineCreateInfo pipelineInfo{
@@ -207,12 +215,13 @@ private:
 		device.destroyShaderModule(fragModule);
 	}
 
-	void createFrameBuffers() {
+	// Renderpass에서 명시한 attachment description과 구조가 일치하여야 함
+	virtual void createFrameBuffers() {
 		swapChainFrameBuffers.resize(swapChainImageViews.size());
 
 		for (auto i = 0; i < swapChainFrameBuffers.size(); i++) {
 			vk::ImageView attachments[] = {
-				swapChainImageViews[i]
+				swapChainImageViews[i],
 			};
 
 			vk::FramebufferCreateInfo framebufferInfo{
@@ -228,6 +237,12 @@ private:
 		}
 	}
 
+	virtual void destroyFrameBuffers() {
+		for (auto i = 0; i < swapChainFrameBuffers.size(); i++) {
+			device.destroyFramebuffer(swapChainFrameBuffers[i]);
+		}
+	}
+
 	void createCommandPool() {
 		auto queueFamilyIndices = findQueueFamilies(physicalDevice, surface);
 
@@ -239,19 +254,28 @@ private:
 		commandPool = device.createCommandPool(poolInfo);
 	}
 
-	void createCommandBuffer() {
-		vk::CommandBufferAllocateInfo allocInfo{
-			.commandPool = commandPool,
-			.level = vk::CommandBufferLevel::ePrimary,
-			.commandBufferCount = 1,
-		};
+	void createCommandBuffers() {
+		commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
-		commandBuffer = device.allocateCommandBuffers(allocInfo).front();
+		for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vk::CommandBufferAllocateInfo allocInfo{
+				.commandPool = commandPool,
+				.level = vk::CommandBufferLevel::ePrimary,
+				.commandBufferCount = 1,
+			};
+
+			commandBuffers[i] = device.allocateCommandBuffers(allocInfo).front();
+		}
 	}
 
 	void recordCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t imageIndex) {
 		vk::CommandBufferBeginInfo beginInfo{};
 		commandBuffer.begin(beginInfo);
+
+		// attachment loadOp = Clear 시 값 지정
+		vk::ClearValue clearValue;
+		clearValue.color = { 0.0f, 0.0f, 0.1f, 1.0f };
+		clearValue.depthStencil = {0.1f, 0};
 
 		vk::RenderPassBeginInfo renderPassInfo{
 			.renderPass = renderPass,
@@ -261,13 +285,12 @@ private:
 				.extent = swapChainExtent,
 			},
 			.clearValueCount = 1,
-			.pClearValues = new vk::ClearValue {{0.0f, 0.0f, 0.0f, 1.0f}},
+			.pClearValues = &clearValue,
 		};
 
 		commandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
-		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
-
+		// Update dynamic state
 		commandBuffer.setViewport(0, vk::Viewport{
 			.x = 0,
 			.y = 0,
@@ -282,6 +305,9 @@ private:
 			.extent = swapChainExtent,
 			});
 
+		// rendering pipeline에 pipeline state object에 저장한 정보를 bind
+		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+
 		commandBuffer.draw(3, 1, 0, 0);
 
 		commandBuffer.endRenderPass();
@@ -295,22 +321,39 @@ private:
 			.flags = vk::FenceCreateFlagBits::eSignaled,
 		};
 
-		imageAvailableSemaphore = device.createSemaphore(semaforeInfo);
-		renderFinishedSemaphore = device.createSemaphore(semaforeInfo);
-		inflightFence = device.createFence(fenceInfo);
+		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		inflightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+		for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			imageAvailableSemaphores[i] = device.createSemaphore(semaforeInfo);
+			renderFinishedSemaphores[i] = device.createSemaphore(semaforeInfo);
+			inflightFences[i] = device.createFence(fenceInfo);
+		}
 	}
 
-	void drawFrame() {
-		std::ignore = device.waitForFences({ inflightFence }, vk::False, UINT64_MAX);
-		device.resetFences({ inflightFence });
+	virtual void drawFrame() {
+		std::ignore = device.waitForFences({ inflightFences[currentFrame]}, vk::False, UINT64_MAX);
 
-		uint32_t imageIndex = device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailableSemaphore, nullptr).value;
+		if (framebufferResized) {
+			recreateSwapChain();
+			framebufferResized = false;
+		}
 
-		commandBuffer.reset();
-		recordCommandBuffer(commandBuffer, imageIndex);
+		auto result{ device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], nullptr) };
+		if (result.result == vk::Result::eSuboptimalKHR) {
+			framebufferResized = true;
+		}
+		
+		device.resetFences({ inflightFences[currentFrame]});
 
-		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphore };
-		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphore };
+		uint32_t imageIndex{ result.value };
+
+		commandBuffers[currentFrame].reset();
+		recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+		
+		vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
+		vk::Semaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
 		vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
 
 		vk::SubmitInfo submitInfo{
@@ -318,12 +361,12 @@ private:
 			.pWaitSemaphores = waitSemaphores,
 			.pWaitDstStageMask = waitStages,
 			.commandBufferCount = 1,
-			.pCommandBuffers = &commandBuffer,
+			.pCommandBuffers = &commandBuffers[currentFrame],
 			.signalSemaphoreCount = 1,
 			.pSignalSemaphores = signalSemaphores,
 		};
 
-		graphicsQueue.submit(submitInfo, inflightFence);
+		graphicsQueue.submit(submitInfo, inflightFences[currentFrame]);
 
 		vk::SwapchainKHR swapChains[]{ swapChain };
 		vk::PresentInfoKHR presentInfo{
@@ -335,6 +378,8 @@ private:
 		};
 
 		std::ignore = presentQueue.presentKHR(presentInfo);
+
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 };
 

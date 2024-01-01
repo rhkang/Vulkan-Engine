@@ -25,14 +25,17 @@ void VEbase::init() {
 	createLogicalDevice();
 	createSwapChain();
 	createSwapChainImageViews();
-
 }
 
 void VEbase::mainLoop() {
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 		keyHandle();
+
+		drawFrame();
 	}
+
+	device.waitIdle();
 }
 
 void VEbase::cleanUpBase() {
@@ -213,8 +216,29 @@ void VEbase::createSwapChainImageViews()
 	}
 }
 
+void VEbase::recreateSwapChain()
+{
+	int width{}, height{};
+	glfwGetFramebufferSize(window, &width, &height);
+	while (width == 0 || height == 0) {
+		glfwGetFramebufferSize(window, &width, &height);
+		glfwWaitEvents();
+	}
 
+	device.waitIdle();
 
+	destroyFrameBuffers();
+
+	for (auto i = 0; i < swapChainImageViews.size(); i++) {
+		device.destroyImageView(swapChainImageViews[i]);
+	}
+
+	device.destroySwapchainKHR(swapChain);
+
+	createSwapChain();
+	createSwapChainImageViews();
+	createFrameBuffers();
+}
 
 vk::SurfaceFormatKHR VEbase::chooseSwapChainSurfaceFormat(std::vector<vk::SurfaceFormatKHR> availableFormats) {
 	for (auto format : availableFormats) {
@@ -462,7 +486,6 @@ void VEwindow::setUpWindow(const char* title, int width, int height) {
 	glfwInit();
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
 	VEwindow::window = glfwCreateWindow(width, height, title, nullptr, nullptr);
 }
