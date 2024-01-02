@@ -3,3 +3,5 @@ CMakePresets.json
 out/
 
 .vs/
+
+x64/

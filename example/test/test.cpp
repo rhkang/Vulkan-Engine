@@ -11,6 +11,10 @@ public:
 		mainLoop();
 		cleanUpBase();
 	}
+
+	void drawFrame() {}
+	void createFrameBuffers() {}
+	void destroyFrameBuffers() {}
 };
 
 int main() {

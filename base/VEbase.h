@@ -7,6 +7,7 @@
 #include "GLFW/glfw3.h"
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include "GLFW/glfw3native.h"
+#include "glm/glm.hpp"
 
 #undef max	// to enable numeric_limits<>::max()
 
@@ -98,6 +99,9 @@ protected:
 	vk::Extent2D swapChainExtent;
 	std::vector<vk::Image> swapChainImages;
 	std::vector<vk::ImageView> swapChainImageViews;
+
+	vk::CommandPool commandPool;
+	std::vector<vk::CommandBuffer> commandBuffers;
 public:
 	VEbase(const char* title) {
 		this->title = title;
@@ -123,10 +127,14 @@ public:
 	vk::Extent2D chooseSwapChainExtent(const vk::SurfaceCapabilitiesKHR&);
 	
 	vk::ShaderModule createShaderModule(std::vector<char>&);
+	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
 	virtual void drawFrame() = 0;
 	virtual void createFrameBuffers() = 0;
 	virtual void destroyFrameBuffers() = 0;
+
+	void createBuffer(vk::DeviceSize, vk::BufferUsageFlags, vk::MemoryPropertyFlags, vk::Buffer&, vk::DeviceMemory&);
+	void copyBuffer(vk::Buffer, vk::Buffer, vk::DeviceSize);
 };
 
 const std::string getShadersPath();

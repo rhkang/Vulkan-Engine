@@ -7,6 +7,12 @@ public:
 	}
 
 	~Triangle() {
+		device.freeMemory(Indices.deviceMemory);
+		device.destroyBuffer(Indices.buffer);
+
+		device.freeMemory(Vertices.deviceMemory);
+		device.destroyBuffer(Vertices.buffer);
+
 		for (auto i = 0;i < MAX_FRAMES_IN_FLIGHT; i++) {
 			device.destroySemaphore(imageAvailableSemaphores[i]);
 			device.destroySemaphore(renderFinishedSemaphores[i]);
@@ -31,6 +37,58 @@ public:
 	}
 
 private:
+	struct Vertex {
+		glm::vec2 pos;
+		glm::vec3 color;
+	};
+
+	struct {
+		vk::Buffer buffer;
+		vk::DeviceMemory deviceMemory;
+
+		const std::vector<Vertex> vertices = {
+			{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+			{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+			{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+		};
+		
+		// Vertex Input Overview
+		// 
+		// binding 0 |
+		// ----------------------
+		// layout 0  | vec2 pos
+		// layout 1  | vec3 color
+		vk::VertexInputBindingDescription bindingDescription{
+			.binding = 0,
+			.stride = sizeof(Vertex),
+			.inputRate = vk::VertexInputRate::eVertex,
+		};
+
+		std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{
+			vk::VertexInputAttributeDescription {
+				.location = 0,
+				.binding = 0,
+				.format = vk::Format::eR32G32Sfloat,
+				.offset = 0,
+			},
+			vk::VertexInputAttributeDescription {
+				.location = 1,
+				.binding = 0,
+				.format = vk::Format::eR32G32B32Sfloat,
+				.offset = offsetof(Vertex, color),
+			},
+		};
+	} Vertices;
+
+	struct {
+		vk::Buffer buffer;
+		vk::DeviceMemory deviceMemory;
+
+		const std::vector<uint16_t> indices{
+			0, 1, 2
+		};
+	} Indices;
+
 	// Renderpass : 렌더링 구조를 명시한다고 보면 된다
 	vk::RenderPass renderPass;
 
@@ -43,8 +101,6 @@ private:
 	// Framebuffer는 Renderpass에서 다루는 attachment의 메모리 저장 정보를 들고있다
 	std::vector<vk::Framebuffer> swapChainFrameBuffers;
 
-	vk::CommandPool commandPool;
-	std::vector<vk::CommandBuffer> commandBuffers;
 	// CPU (user app.) 단에서의 synchronization에 사용한다
 	std::vector<vk::Fence> inflightFences;
 
@@ -54,6 +110,60 @@ private:
 
 	uint32_t currentFrame{ 0 };
 
+	void createVertexBuffer() {
+		auto& vertices = Vertices.vertices;
+		auto size = sizeof(vertices[0]) * vertices.size();
+
+		vk::Buffer stagingBuffer;
+		vk::DeviceMemory stagingBufferMemory;
+		createBuffer(size,
+			vk::BufferUsageFlagBits::eTransferSrc,															// Transfer Src
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,	// Host Visible | Host Coherent
+			stagingBuffer, stagingBufferMemory);
+
+		// Staging Buffer에 데이터 복사
+		auto data = device.mapMemory(stagingBufferMemory, 0, size);
+		memcpy(data, Vertices.vertices.data(), (size_t)size);
+		device.unmapMemory(stagingBufferMemory);
+
+		// Device Local 영역에 두는 것이 목적. GPU가 read하는데 가장 optimal한 영역임.
+		createBuffer(size,
+			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,		// Transfer Dst | Vertex Buffer
+			vk::MemoryPropertyFlagBits::eDeviceLocal,									// Device Local
+			Vertices.buffer, Vertices.deviceMemory);
+
+		copyBuffer(stagingBuffer, Vertices.buffer, size);
+
+		device.destroyBuffer(stagingBuffer);
+		device.freeMemory(stagingBufferMemory);
+	}
+
+	void createIndexBuffer() {
+		auto& indices = Indices.indices;
+		auto size = sizeof(indices[0]) * indices.size();
+
+		vk::Buffer stagingBuffer;
+		vk::DeviceMemory stagingBufferMemory;
+		createBuffer(size,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			stagingBuffer, stagingBufferMemory);
+
+		auto data = device.mapMemory(stagingBufferMemory, 0, size);
+		memcpy(data, indices.data(), size);
+		device.unmapMemory(stagingBufferMemory);
+
+		createBuffer(size,
+			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			Indices.buffer, Indices.deviceMemory);
+
+		copyBuffer(stagingBuffer, Indices.buffer, size);
+
+		device.destroyBuffer(stagingBuffer);
+		device.freeMemory(stagingBufferMemory);
+	}
+
 	void prepare() {
 		createRenderPass();
 		createGraphicsPipeLine();
@@ -61,6 +171,8 @@ private:
 		createCommandPool();
 		createCommandBuffers();
 		createSyncObjects();
+		createVertexBuffer();
+		createIndexBuffer();
 	}
 
 	// - Attachment
@@ -138,8 +250,10 @@ private:
 		};
 
 		vk::PipelineVertexInputStateCreateInfo vertexInputState{
-			.vertexBindingDescriptionCount = 0,
-			.vertexAttributeDescriptionCount = 0,
+			.vertexBindingDescriptionCount = 1,
+			.pVertexBindingDescriptions = &Vertices.bindingDescription,
+			.vertexAttributeDescriptionCount = static_cast<uint32_t>(Vertices.attributeDescriptions.size()),
+			.pVertexAttributeDescriptions = Vertices.attributeDescriptions.data(),
 		};
 
 		vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
@@ -307,9 +421,15 @@ private:
 
 		// rendering pipeline에 pipeline state object에 저장한 정보를 bind
 		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+		
+		vk::Buffer vertexbuffers[] = { Vertices.buffer };
+		vk::DeviceSize offsets[] = { 0 };
 
-		commandBuffer.draw(3, 1, 0, 0);
+		commandBuffer.bindVertexBuffers(0, 1, vertexbuffers, offsets);
+		commandBuffer.bindIndexBuffer(Indices.buffer, 0, vk::IndexType::eUint16);
 
+		commandBuffer.drawIndexed(static_cast<uint32_t>(Vertices.vertices.size()), 1, 0, 0, 0);
+		
 		commandBuffer.endRenderPass();
 
 		commandBuffer.end();

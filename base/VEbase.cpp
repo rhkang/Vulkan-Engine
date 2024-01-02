@@ -293,6 +293,72 @@ vk::ShaderModule VEbase::createShaderModule(std::vector<char>& code)
 	return module;
 }
 
+uint32_t VEbase::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties)
+{
+	auto memProperties = physicalDevice.getMemoryProperties();
+	
+	for (auto i = 0; i < memProperties.memoryTypeCount; i++) {
+		if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+			return i;
+		}
+	}
+
+	throw std::runtime_error("failed to find suitable memory type");
+}
+
+void VEbase::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& deviceMemory) {
+	vk::BufferCreateInfo bufferCI{
+		.size = size,
+		.usage = usage,
+		.sharingMode = vk::SharingMode::eExclusive,
+	};
+
+	buffer = device.createBuffer(bufferCI);
+
+	auto memRequirements = device.getBufferMemoryRequirements(buffer);
+
+	vk::MemoryAllocateInfo allocInfo{
+		.allocationSize = memRequirements.size,
+		.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties),
+	};
+
+	deviceMemory = device.allocateMemory(allocInfo);
+	device.bindBufferMemory(buffer, deviceMemory, 0);
+
+	// GPU 메모리에는 할당 상한이 존재한다 (maxMemoryAllocationCount)
+	// 따라서 대량의 오브젝트를 할당할 경우에 offset을 통해 구분하는 방법이 있다.
+	// 관련 라이브러리로 VMA(VulkanMemoryAllocator)가 있다.
+}
+
+void VEbase::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
+	vk::CommandBufferAllocateInfo allocInfo{
+		.commandPool = commandPool,
+		.level = vk::CommandBufferLevel::ePrimary,
+		.commandBufferCount = 1,
+	};
+
+	auto commandBuffer = device.allocateCommandBuffers(allocInfo).front();
+
+	commandBuffer.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+
+	vk::BufferCopy copyRegion{
+		.size = size,
+	};
+	commandBuffer.copyBuffer(srcBuffer, dstBuffer, copyRegion);
+	commandBuffer.end();
+
+	vk::SubmitInfo submitInfo{
+		.commandBufferCount = 1,
+		.pCommandBuffers = &commandBuffer,
+	};
+
+	// Graphics & Compute Queue Family는 암시적으로 Transfer 지원해서 그대로 사용해도 상관 없음
+	graphicsQueue.submit(submitInfo, nullptr);
+	graphicsQueue.waitIdle();
+
+	device.freeCommandBuffers(commandPool, commandBuffer);
+}
+
 bool isDeviceSuitable(vk::PhysicalDevice device, vk::SurfaceKHR surface) {
 	auto indice = findQueueFamilies(device, surface);
 
