@@ -117,7 +117,7 @@ private:
 		vk::Buffer stagingBuffer;
 		vk::DeviceMemory stagingBufferMemory;
 		createBuffer(size,
-			vk::BufferUsageFlagBits::eTransferSrc,															// Transfer Src
+			vk::BufferUsageFlagBits::eTransferSrc,													// Transfer Src
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,	// Host Visible | Host Coherent
 			stagingBuffer, stagingBufferMemory);
 
@@ -129,7 +129,7 @@ private:
 		// Device Local 영역에 두는 것이 목적. GPU가 read하는데 가장 optimal한 영역임.
 		createBuffer(size,
 			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,		// Transfer Dst | Vertex Buffer
-			vk::MemoryPropertyFlagBits::eDeviceLocal,									// Device Local
+			vk::MemoryPropertyFlagBits::eDeviceLocal,											// Device Local
 			Vertices.buffer, Vertices.deviceMemory);
 
 		copyBuffer(stagingBuffer, Vertices.buffer, size);

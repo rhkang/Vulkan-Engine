@@ -14,8 +14,7 @@ function(buildExample EXAMPLE_NAME)
 	add_executable(${EXAMPLE_NAME}
 		${MAIN_CPP}
 		${BASE_SRC}
-		${SHADER_SRC}
-	)
+		${SHADER_SRC})
 
 	target_link_libraries(${EXAMPLE_NAME} ${Vulkan_LIBRARY} ${glfw_LIBRARY})
 
@@ -31,6 +30,7 @@ endfunction(buildExamples)
 set(EXAMPLES
 	test	# library 잘 불러오는지 확인
 	triangle
+	uniform
 )
 
 buildExamples()
