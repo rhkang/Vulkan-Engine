@@ -102,6 +102,10 @@ protected:
 
 	vk::CommandPool commandPool;
 	std::vector<vk::CommandBuffer> commandBuffers;
+
+	std::vector<vk::Fence> inflightFences;
+	std::vector<vk::Semaphore> renderSemaphores;
+	std::vector<vk::Semaphore> presentReadySemaphores;
 public:
 	VEbase(const char* title) {
 		this->title = title;
@@ -129,12 +133,15 @@ public:
 	vk::ShaderModule createShaderModule(std::vector<char>&);
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
-	virtual void drawFrame() = 0;
-	virtual void createFrameBuffers() = 0;
-	virtual void destroyFrameBuffers() = 0;
+	virtual void drawFrame();
+	virtual void createFrameBuffers();
+	virtual void destroyFrameBuffers();
+
+	virtual void createFences();
+	virtual void destroyFences();
 
 	void createBuffer(vk::DeviceSize, vk::BufferUsageFlags, vk::MemoryPropertyFlags, vk::Buffer&, vk::DeviceMemory&);
-	void copyBuffer(vk::Buffer, vk::Buffer, vk::DeviceSize);
+	void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
 };
 
 const std::string getShadersPath();

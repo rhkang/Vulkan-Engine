@@ -25,6 +25,7 @@ void VEbase::init() {
 	createLogicalDevice();
 	createSwapChain();
 	createSwapChainImageViews();
+	createFences();
 }
 
 void VEbase::mainLoop() {
@@ -112,7 +113,9 @@ void VEbase::createLogicalDevice() {
 		queueCreateInfos.push_back(queueInfo);
 	}
 
-	vk::PhysicalDeviceFeatures features{};
+	vk::PhysicalDeviceFeatures features{
+			//.logicOp = vk::True,
+	};
 	vk::DeviceCreateInfo deviceInfo{
 		.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
 		.pQueueCreateInfos = queueCreateInfos.data(),
@@ -227,6 +230,9 @@ void VEbase::recreateSwapChain()
 
 	device.waitIdle();
 
+	destroyFences();
+	createFences();
+
 	destroyFrameBuffers();
 
 	for (auto i = 0; i < swapChainImageViews.size(); i++) {
@@ -304,6 +310,39 @@ uint32_t VEbase::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags pro
 	}
 
 	throw std::runtime_error("failed to find suitable memory type");
+}
+
+void VEbase::drawFrame()
+{
+}
+
+void VEbase::createFrameBuffers()
+{
+}
+
+void VEbase::destroyFrameBuffers()
+{
+}
+
+void VEbase::createFences()
+{
+	vk::FenceCreateInfo fenceInfo{
+			.flags = vk::FenceCreateFlagBits::eSignaled,
+	};
+
+	inflightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+	for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		inflightFences[i] = device.createFence(fenceInfo);
+	}
+}
+
+void VEbase::destroyFences()
+{
+	for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		device.destroyFence(inflightFences[i]);
+	}
+
 }
 
 void VEbase::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::Buffer& buffer, vk::DeviceMemory& deviceMemory) {

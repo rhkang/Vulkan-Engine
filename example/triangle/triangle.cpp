@@ -16,8 +16,9 @@ public:
 		for (auto i = 0;i < MAX_FRAMES_IN_FLIGHT; i++) {
 			device.destroySemaphore(imageAvailableSemaphores[i]);
 			device.destroySemaphore(renderFinishedSemaphores[i]);
-			device.destroyFence(inflightFences[i]);
 		}
+
+		destroyFences();
 
 		device.destroyCommandPool(commandPool);
 
@@ -100,9 +101,6 @@ private:
 
 	// Framebuffer는 Renderpass에서 다루는 attachment의 메모리 저장 정보를 들고있다
 	std::vector<vk::Framebuffer> swapChainFrameBuffers;
-
-	// CPU (user app.) 단에서의 synchronization에 사용한다
-	std::vector<vk::Fence> inflightFences;
 
 	// Queue 내의 synchronization에 사용한다
 	std::vector<vk::Semaphore> imageAvailableSemaphores;
@@ -281,14 +279,27 @@ private:
 			.sampleShadingEnable = vk::False,
 		};
 
+		// color blending - fragment shader 결과 <--> framebuffer에 들어있던 값 합치는 작업
 		vk::PipelineColorBlendAttachmentState colorBlendAttachment{
-			.blendEnable = vk::False,
+			.blendEnable = vk::False,	// shading 결과 그대로 반영
+			// 결과 마스크 - eB를 제외하면 결과값에서 B 채널은 무조건 0으로 강제
 			.colorWriteMask = vk::ColorComponentFlagBits::eR |
 							vk::ColorComponentFlagBits::eG |
 							vk::ColorComponentFlagBits::eB |
 							vk::ColorComponentFlagBits::eA,
+
+			// standard alpha blending 예시:
+			// blenEnable = true로 설정하고
+			// src, dst colorblend factor (ex. src = src_alpha, dst = 1 - src_alpha)
+			// colorblendOp = add
+			// src, dst alphablend factor (ex. src = 1, dst = 0)
+			// alphablendOp = add
+			// -->	final.rgb	= newAlpha * newColor + (1 - newAlpha) * oldColor
+			//		final.a		= newAlpha.a
 		};
 
+		// 1. 위 blendOp에서 사용할 수 있는 blendConstant 설정
+		// 2. logicOp 설정 -> bitwise combination 등 (True일 경우 blendOp는 사용하지 않음) + device feature에서 logicOp 설정 추가
 		vk::PipelineColorBlendStateCreateInfo colorBlendState{
 			.logicOpEnable = vk::False,
 			.attachmentCount = 1,
@@ -334,7 +345,7 @@ private:
 		swapChainFrameBuffers.resize(swapChainImageViews.size());
 
 		for (auto i = 0; i < swapChainFrameBuffers.size(); i++) {
-			vk::ImageView attachments[] = {
+			vk::ImageView attachments[] {
 				swapChainImageViews[i],
 			};
 
@@ -437,18 +448,13 @@ private:
 
 	void createSyncObjects() {
 		vk::SemaphoreCreateInfo semaforeInfo{};
-		vk::FenceCreateInfo fenceInfo{
-			.flags = vk::FenceCreateFlagBits::eSignaled,
-		};
 
 		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
 		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-		inflightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
 		for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			imageAvailableSemaphores[i] = device.createSemaphore(semaforeInfo);
 			renderFinishedSemaphores[i] = device.createSemaphore(semaforeInfo);
-			inflightFences[i] = device.createFence(fenceInfo);
 		}
 	}
 
@@ -461,8 +467,9 @@ private:
 		}
 
 		auto result{ device.acquireNextImageKHR(swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], nullptr) };
-		if (result.result == vk::Result::eSuboptimalKHR) {
+		if (result.result == vk::Result::eSuboptimalKHR || result.result == vk::Result::eErrorOutOfDateKHR) {
 			framebufferResized = true;
+			return;
 		}
 		
 		device.resetFences({ inflightFences[currentFrame]});
@@ -497,7 +504,11 @@ private:
 			.pImageIndices = &imageIndex,
 		};
 
-		std::ignore = presentQueue.presentKHR(presentInfo);
+		auto presentResult = vkQueuePresentKHR((VkQueue&)presentQueue, &(VkPresentInfoKHR&)presentInfo);
+		if (presentResult == VkResult::VK_ERROR_OUT_OF_DATE_KHR) {
+			framebufferResized = true;
+			return;
+		}
 
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
