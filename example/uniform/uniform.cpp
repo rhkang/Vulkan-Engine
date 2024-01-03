@@ -7,6 +7,12 @@ public:
 	}
 
 	~Uniform() {
+		// (TODO) vertices, indices, uniform datas
+		device.destroyBuffer();
+		device.freeMemory();
+
+		device.destroyDescriptorSetLayout(descriptorSetLayout);
+
 		for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			device.destroySemaphore(renderSemaphores[i]);
 			device.destroySemaphore(presentReadySemaphores[i]);
@@ -26,8 +32,12 @@ public:
 	}
 private:
 	vk::RenderPass renderpass;
-	vk::PipelineLayout pipelinelayout{};
+	vk::PipelineLayout pipelineLayout{};
 	vk::Pipeline graphicsPipeline;
+
+	vk::DescriptorSetLayout descriptorSetLayout{};
+	std::vector<vk::DescriptorSet> descriptorSets{};
+	vk::DescriptorPool descriptorPool{};
 
 	std::vector<vk::Framebuffer> frameBuffers;
 
@@ -43,9 +53,10 @@ private:
 		vk::DeviceMemory memory;
 
 		const std::vector<Vertex> vertices = {
-			{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-			{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-			{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+			{{-0.5, -0.5f}, {1.0f, 0.0f, 0.0f}},
+			{{-0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+			{{0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
+			{{0.5f, 0.5f}, {0.0f, 1.0f, 1.0f}}
 		};
 
 		vk::VertexInputBindingDescription binding{
@@ -75,11 +86,117 @@ private:
 		vk::DeviceMemory memory;
 
 		const std::vector<uint16_t> indices = {
-			0, 1, 2
+			0, 2, 1, 1, 2, 3
 		};
 	} Indices;
 
+	struct UniformBufferObject {
+		glm::mat4 model;
+		glm::mat4 view;
+		glm::mat4 proj;
+	};
+
+	struct UniformData {
+		vk::Buffer buffer;
+		vk::DeviceMemory memory;
+		UniformBufferObject data;
+		void* map;
+	};
+
+	std::array<UniformData, 2> uniformData{};
+
+	void createUniformBuffer() {
+		for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			auto size = sizeof(UniformBufferObject);
+			createBuffer(size,
+				vk::BufferUsageFlagBits::eUniformBuffer,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+				uniformData[i].buffer, uniformData[i].memory);
+
+			uniformData[i].map = device.mapMemory(uniformData[i].memory, 0, size);
+		}
+	}
+
+	void updateUniformBuffer(uint32_t currentImage) {
+		static auto startTime = std::chrono::high_resolution_clock::now();
+
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+		UniformBufferObject ubo{
+			.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+			.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f),
+		};
+
+		// GLM's Y coord. of the clip coord. is inverted
+		ubo.proj[1][1] *= -1;
+
+		memcpy(uniformData[currentImage].map, &ubo, sizeof(ubo));
+	}
+
+	void setDescriptorSets() {
+		vk::DescriptorSetLayoutBinding uboLayoutBinding{
+			.binding = 0,
+			.descriptorType = vk::DescriptorType::eUniformBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eVertex,
+		};
+
+		vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCI{
+			.bindingCount = 1,
+			.pBindings = &uboLayoutBinding,
+		};
+
+		descriptorSetLayout = device.createDescriptorSetLayout(descriptorSetLayoutCI);
+
+		vk::DescriptorPoolSize poolSize{
+			.type = vk::DescriptorType::eUniformBuffer,
+			.descriptorCount = MAX_FRAMES_IN_FLIGHT,	// descriptor 타입 별 개수 상한
+		};
+
+		vk::DescriptorPoolCreateInfo descriptorPoolCI{
+			.maxSets = MAX_FRAMES_IN_FLIGHT,	// 풀에 존재할 수 있는 set의 개수 상한
+			.poolSizeCount = 1,
+			.pPoolSizes = &poolSize,
+		};
+
+		descriptorPool = device.createDescriptorPool(descriptorPoolCI);
+
+		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+		vk::DescriptorSetAllocateInfo allocInfo{
+			.descriptorPool = descriptorPool,
+			.descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+			.pSetLayouts = layouts.data(),
+		};
+
+		descriptorSets = device.allocateDescriptorSets(allocInfo);
+
+		for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vk::DescriptorBufferInfo bufferInfo{
+				.buffer = uniformData[i].buffer,
+				.offset = 0,
+				.range = sizeof(UniformBufferObject),
+			};
+
+			vk::WriteDescriptorSet descriptorWrite{
+				.dstSet = descriptorSets[i],
+				.dstBinding = 0,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = vk::DescriptorType::eUniformBuffer,
+				.pBufferInfo = &bufferInfo,
+			};
+
+			device.updateDescriptorSets(descriptorWrite, nullptr);
+		}
+	}
+
 	void prepare() {
+		// Uniform Buffer
+		createUniformBuffer();
+		setDescriptorSets();
+
 		// renderpass
 		vk::AttachmentDescription attachment{
 			.format = swapChainFormat,
@@ -171,7 +288,7 @@ private:
 			.rasterizerDiscardEnable = vk::False,
 			.polygonMode = vk::PolygonMode::eFill,
 			.cullMode = vk::CullModeFlagBits::eBack,
-			.frontFace = vk::FrontFace::eClockwise,
+			.frontFace = vk::FrontFace::eCounterClockwise,
 			.depthBiasEnable = vk::False,
 			.lineWidth = 1.0f,
 		};
@@ -196,9 +313,11 @@ private:
 		};
 
 		vk::PipelineLayoutCreateInfo layoutCI{
+			.setLayoutCount = 1,
+			.pSetLayouts = &descriptorSetLayout,
 		};
 
-		pipelinelayout = device.createPipelineLayout(layoutCI);
+		pipelineLayout = device.createPipelineLayout(layoutCI);
 
 		vk::GraphicsPipelineCreateInfo pipelineCI{
 			.stageCount = static_cast<uint32_t>(shaderStages.size()),
@@ -211,7 +330,7 @@ private:
 			.pDepthStencilState = nullptr,
 			.pColorBlendState = &colorBlending,
 			.pDynamicState = &dynamicStateCI,
-			.layout = pipelinelayout,
+			.layout = pipelineLayout,
 			.renderPass = renderpass,
 			.subpass = 0,
 		};
@@ -292,8 +411,6 @@ private:
 
 		device.destroyBuffer(stagingBuffer);
 		device.freeMemory(stagingBufferMemory);
-
-		// uniformbuffer
 	}
 
 	void createFrameBuffers() {
@@ -362,8 +479,11 @@ private:
 		commandbuffer.bindVertexBuffers(0, Vertices.buffer, offsets);
 		commandbuffer.bindIndexBuffer(Indices.buffer, 0, vk::IndexType::eUint16);
 
+		// bind descriptor sets
+		commandbuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
 		// draw();
-		commandbuffer.drawIndexed(Vertices.vertices.size(), 1, 0, 0, 0);
+		commandbuffer.drawIndexed(Indices.indices.size(), 1, 0, 0, 0);
 
 		commandbuffer.endRenderPass();
 		commandbuffer.end();
@@ -384,8 +504,10 @@ private:
 
 		device.resetFences(inflightFences[currentFrame]);
 
-		uint32_t imageIndex{result.value};
 		commandBuffers[currentFrame].reset();
+		
+		uint32_t imageIndex{result.value};
+		updateUniformBuffer(currentFrame);
 
 		recordCommand(commandBuffers[currentFrame], imageIndex);
 
